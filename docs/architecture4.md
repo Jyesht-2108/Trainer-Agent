@@ -189,5 +189,3 @@ ________________________________________
 •	 GCP download integration
 •	 Log progress to agent_logs
 •	 Demo run: project transitions pending_evaluation → completed
-
-prince

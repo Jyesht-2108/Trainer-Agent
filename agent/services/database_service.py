@@ -198,6 +198,77 @@ class DatabaseService:
             return response.data if response.data else []
         except Exception as e:
             raise Exception(f"Failed to retrieve projects with status {status}: {str(e)}")
+    
+    def get_model_by_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve model metadata by project_id.
+        
+        Args:
+            project_id: UUID of the project
+            
+        Returns:
+            Model data dictionary or None if not found
+            
+        Raises:
+            Exception: If database query fails
+        """
+        try:
+            response = self.client.table("models").select("*").eq("project_id", project_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            raise Exception(f"Failed to retrieve model for project {project_id}: {str(e)}")
+    
+    def update_model_metrics(self, model_id: str, accuracy: float, metadata: Dict[str, Any]) -> None:
+        """
+        Update model with evaluation metrics.
+        
+        Args:
+            model_id: UUID of the model
+            accuracy: Model accuracy score
+            metadata: Detailed metrics dictionary
+            
+        Raises:
+            Exception: If database update fails
+        """
+        try:
+            data = {
+                "accuracy": accuracy,
+                "metadata": metadata
+            }
+            
+            response = self.client.table("models").update(data).eq("id", model_id).execute()
+            
+            if not response.data:
+                raise Exception(f"Model {model_id} not found or update failed")
+        except Exception as e:
+            raise Exception(f"Failed to update model metrics: {str(e)}")
+    
+    def update_project_metadata(self, project_id: str, metadata: Dict[str, Any]) -> None:
+        """
+        Update project metadata.
+        
+        Args:
+            project_id: UUID of the project
+            metadata: Metadata dictionary to update
+            
+        Raises:
+            Exception: If database update fails
+        """
+        try:
+            data = {
+                "metadata": metadata,
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            
+            response = self.client.table("projects").update(data).eq("id", project_id).execute()
+            
+            if not response.data:
+                raise Exception(f"Project {project_id} not found or update failed")
+        except Exception as e:
+            raise Exception(f"Failed to update project metadata: {str(e)}")
 
 
 # Global database service instance

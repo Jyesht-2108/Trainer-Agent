@@ -209,6 +209,59 @@ class StorageService:
             
         except Exception:
             return False
+    
+    def upload_bundle(self, local_path: str, filename: str) -> str:
+        """
+        Upload user bundle (zip file) to GCP bucket.
+        
+        Args:
+            local_path: Local path to the zip file
+            filename: Name of the file
+            
+        Returns:
+            Full GCS URL of the uploaded bundle
+            
+        Raises:
+            FileNotFoundError: If local file doesn't exist
+            GoogleAPIError: If upload fails
+        """
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f"Bundle file not found at {local_path}")
+        
+        # Upload to exports folder
+        blob_path = f"exports/{filename}"
+        blob = self.bucket.blob(blob_path)
+        
+        # Upload file
+        blob.upload_from_filename(local_path)
+        
+        # Make it publicly accessible (optional)
+        # blob.make_public()
+        
+        gcs_url = f"gs://{self.bucket_name}/{blob_path}"
+        return gcs_url
+    
+    def download_model(self, gcs_url: str, local_path: str) -> None:
+        """
+        Download model file from GCP bucket.
+        
+        Args:
+            gcs_url: GCS URL of the model
+            local_path: Local path to save the model
+            
+        Raises:
+            NotFound: If file doesn't exist in GCS
+            GoogleAPIError: If download fails
+        """
+        bucket_name, blob_path = self.parse_gcs_url(gcs_url)
+        bucket = self.client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        
+        # Download file
+        blob.download_to_filename(local_path)
 
 
 # Global storage service instance
