@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     # Training defaults
     batch_size: int = 64  # Increased for better GPU utilization on M3
-    default_epochs: int = 3  # Reduced for faster testing
+    default_epochs: int = 10  # Increased for better accuracy
     default_learning_rate: float = 0.001
     
     model_config = SettingsConfigDict(

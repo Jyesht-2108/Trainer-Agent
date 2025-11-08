@@ -77,6 +77,8 @@ class PollingService:
                         if result.get("success"):
                             print(f"[{datetime.now()}] ✓ Training completed successfully for {project_name}")
                             print(f"[{datetime.now()}] Model URL: {result.get('model_url')}")
+                            # Remove from processed so evaluation can pick it up
+                            self.processed_projects.discard(project_id)
                         else:
                             print(f"[{datetime.now()}] ✗ Training failed for {project_name}: {result.get('error')}")
                             self.processed_projects.discard(project_id)

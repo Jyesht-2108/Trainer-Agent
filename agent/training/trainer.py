@@ -61,6 +61,14 @@ class ModelTrainer:
             weight_decay=0.01  # L2 regularization
         )
         
+        # Learning rate scheduler for better convergence
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode='min',
+            factor=0.5,
+            patience=2
+        )
+        
         # Determine device: MPS (Apple Silicon) > CUDA > CPU
         if torch.backends.mps.is_available():
             self.device = torch.device("mps")
@@ -102,11 +110,13 @@ class ModelTrainer:
         Returns:
             Tuple of (train_loader, val_loader)
         """
-        # Define image transforms with ImageNet normalization
-        # Use simpler transforms for faster loading
-        transform = transforms.Compose([
-            transforms.Resize(256),  # Resize shorter side to 256
-            transforms.CenterCrop(224),  # Crop center 224x224 (faster than direct resize)
+        # Training transforms with data augmentation for better generalization
+        train_transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.RandomCrop(224),  # Random crop for augmentation
+            transforms.RandomHorizontalFlip(p=0.5),  # Random flip
+            transforms.RandomRotation(15),  # Random rotation up to 15 degrees
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),  # Color augmentation
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],  # ImageNet mean
@@ -114,12 +124,23 @@ class ModelTrainer:
             )
         ])
         
-        # Create datasets using ImageFolder
+        # Validation transforms without augmentation
+        val_transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
+        
+        # Create datasets using ImageFolder with different transforms
         train_dir = os.path.join(self.data_dir, "train")
         val_dir = os.path.join(self.data_dir, "val")
         
-        train_dataset = datasets.ImageFolder(train_dir, transform=transform)
-        val_dataset = datasets.ImageFolder(val_dir, transform=transform)
+        train_dataset = datasets.ImageFolder(train_dir, transform=train_transform)
+        val_dataset = datasets.ImageFolder(val_dir, transform=val_transform)
         
         # Create data loaders with optimized settings
         # Use more workers for faster data loading (prevents GPU starvation)
@@ -206,6 +227,36 @@ class ModelTrainer:
         
         return avg_loss
 
+    def _validate_epoch(self) -> Tuple[float, float]:
+        """
+        Run validation and return loss and accuracy.
+        
+        Returns:
+            Tuple of (validation_loss, validation_accuracy)
+        """
+        self.model.eval()
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        
+        with torch.no_grad():
+            for inputs, labels in self.val_loader:
+                inputs = inputs.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
+                
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, labels)
+                
+                running_loss += loss.item()
+                _, predicted = torch.max(outputs, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+        
+        val_loss = running_loss / len(self.val_loader)
+        val_accuracy = 100 * correct / total
+        
+        return val_loss, val_accuracy
+    
     def train(self) -> nn.Module:
         """
         Execute the complete training loop for all epochs.
@@ -225,6 +276,7 @@ class ModelTrainer:
         print(f"📦 Batch size: {self.batch_size}, Batches per epoch: {len(self.train_loader)}")
         
         start_time = time.time()
+        best_val_acc = 0.0
         
         # Training loop
         for epoch in range(1, self.epochs + 1):
@@ -233,7 +285,13 @@ class ModelTrainer:
             print(f"\n📈 Epoch {epoch}/{self.epochs}")
             
             # Train for one epoch
-            avg_loss = self._train_epoch(epoch)
+            train_loss = self._train_epoch(epoch)
+            
+            # Validate
+            val_loss, val_acc = self._validate_epoch()
+            
+            # Update learning rate based on validation loss
+            self.scheduler.step(val_loss)
             
             # Synchronize for accurate timing
             if self.device.type == 'mps':
@@ -244,10 +302,16 @@ class ModelTrainer:
             epoch_time = time.time() - epoch_start_time
             
             # Log progress
-            print(f"✓ Epoch {epoch}/{self.epochs} completed - Loss: {avg_loss:.4f} - Time: {epoch_time:.2f}s")
+            print(f"✓ Epoch {epoch}/{self.epochs} - Train Loss: {train_loss:.4f} - Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.2f}% - Time: {epoch_time:.2f}s")
+            
+            # Track best model
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                print(f"  🌟 New best validation accuracy: {best_val_acc:.2f}%")
         
         total_time = time.time() - start_time
         print(f"\n🎉 Training completed in {total_time:.2f}s ({total_time/60:.1f} minutes)")
+        print(f"🏆 Best validation accuracy: {best_val_acc:.2f}%")
         
         return self.model
 

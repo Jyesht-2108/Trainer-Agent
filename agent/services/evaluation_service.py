@@ -121,14 +121,57 @@ async def execute_evaluation(project_id: str) -> Dict[str, Any]:
         storage_service.download_dataset(dataset.get("gcs_url"), dataset_zip_path)
         
         # Extract dataset
-        from agent.utils.file_utils import unzip_dataset, auto_flatten_dataset, normalize_folder_names
+        from agent.utils.file_utils import (
+            unzip_dataset, 
+            auto_flatten_dataset, 
+            normalize_folder_names,
+            validate_dataset_structure,
+            create_val_from_train,
+            auto_split_dataset
+        )
+        
         unzip_dataset(dataset_zip_path, dataset_extract_dir)
         auto_flatten_dataset(dataset_extract_dir)
         normalize_folder_names(dataset_extract_dir)
         
+        # Check if we have train and test but no val
+        has_train = os.path.exists(os.path.join(dataset_extract_dir, 'train'))
+        has_test = os.path.exists(os.path.join(dataset_extract_dir, 'test'))
+        has_val = os.path.exists(os.path.join(dataset_extract_dir, 'val'))
+        
+        if has_train and has_test and not has_val:
+            # Create val from train
+            db_service.log_agent_activity(
+                project_id,
+                "Found train/test but no val - creating validation set from training data",
+                "info"
+            )
+            create_val_from_train(dataset_extract_dir, val_ratio=0.2)
+        
+        # Validate dataset structure - if not valid, auto-split
+        if not validate_dataset_structure(dataset_extract_dir):
+            db_service.log_agent_activity(
+                project_id,
+                "No train/val/test structure found - auto-splitting dataset",
+                "info"
+            )
+            
+            try:
+                auto_split_dataset(dataset_extract_dir, train_ratio=0.7, val_ratio=0.2)
+                db_service.log_agent_activity(
+                    project_id,
+                    "Dataset auto-split completed successfully",
+                    "info"
+                )
+            except Exception as e:
+                error_msg = f"Failed to auto-split dataset: {str(e)}"
+                db_service.log_agent_activity(project_id, error_msg, "error")
+                db_service.update_project_status(project_id, "failed")
+                return {"success": False, "error": error_msg}
+        
         test_dir = os.path.join(dataset_extract_dir, "test")
         if not os.path.exists(test_dir):
-            error_msg = "Test directory not found in dataset"
+            error_msg = "Test directory not found in dataset after processing"
             db_service.log_agent_activity(project_id, error_msg, "error")
             db_service.update_project_status(project_id, "failed")
             return {"success": False, "error": error_msg}
